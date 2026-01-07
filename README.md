@@ -1,151 +1,293 @@
-# 🧠 FinWise Core
-### Institutional-Grade AI Financial Intelligence Platform
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/TensorFlow-2.20-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white" alt="TensorFlow"/>
+  <img src="https://img.shields.io/badge/Neo4j-AuraDB-4581C3?style=for-the-badge&logo=neo4j&logoColor=white" alt="Neo4j"/>
+  <img src="https://img.shields.io/badge/Streamlit-1.x-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit"/>
+  <img src="https://img.shields.io/badge/Gradio-5.x-F97316?style=for-the-badge&logo=gradio&logoColor=white" alt="Gradio"/>
+</p>
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?style=for-the-badge&logo=tensorflow)
-![Neo4j](https://img.shields.io/badge/Neo4j-AuraDB-blueviolet?style=for-the-badge&logo=neo4j)
-![Streamlit](https://img.shields.io/badge/Streamlit-App-red?style=for-the-badge&logo=streamlit)
-![Gradio](https://img.shields.io/badge/Gradio-Terminal-orange?style=for-the-badge&logo=gradio)
+<h1 align="center">🧠 FinWise Core</h1>
+<h3 align="center">Institutional-Grade AI Financial Intelligence Platform</h3>
 
-**FinWise Core** is a modular, high-frequency financial intelligence engine designed for professional market analysis. It combines **probabilistic price forecasting** (LSTM + Heston Monte Carlo) with **real-time sentiment analysis** (FinBERT + News Pipeline) and a **Knowledge Graph (KG)** backbone to deliver regime-aware market insights.
+<p align="center">
+  <em>Probabilistic · Regime-Aware · Non-Deterministic</em>
+</p>
 
 ---
 
-## 🏗️ Modular Architecture
+## 📋 Table of Contents
 
-The project follows a **PM-grade Domain-Driven Design (DDD)** structure to ensure scalability, maintainability, and clear separation of concerns.
+| Section | Description |
+|---------|-------------|
+| [Overview](#-overview) | What is FinWise Core? |
+| [Architecture](#-architecture) | System design and data flow |
+| [Project Structure](#-project-structure) | Folder organization |
+| [Features](#-key-features) | Core capabilities |
+| [Installation](#-installation) | Setup instructions |
+| [Usage](#-usage) | How to run the apps |
+| [API Keys](#-api-keys-required) | External services needed |
+| [Contributing](#-contributing) | Development guidelines |
+
+---
+
+## 🎯 Overview
+
+**FinWise Core** is a modular, high-frequency financial intelligence engine designed for professional market analysis. It combines:
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Price Forecasting** | LSTM + Heston Monte Carlo | Probabilistic price prediction with risk modeling |
+| **Sentiment Analysis** | FinBERT + NLP Pipeline | Real-time news and social sentiment scoring |
+| **Knowledge Graph** | Neo4j AuraDB | Temporal financial state tracking |
+| **Conversational AI** | Google Gemini Pro | Natural language database querying |
+
+---
+
+## 🏗 Architecture
 
 ```mermaid
-graph TD
-    User([User])
-    
-    subgraph "App Layer"
-        SL[Streamlit UI<br>(Recall/Chat)]
-        GR[Gradio Terminal<br>(Risk/Quant)]
+flowchart TB
+    subgraph "📱 Application Layer"
+        SL[Streamlit UI<br/>Chat + Research]
+        GR[Gradio Terminal<br/>Risk + Quant]
     end
-    
-    subgraph "Core Layer"
+
+    subgraph "⚙️ Core Layer"
         ORC[Orchestrator]
-        CFG[Config]
+        CFG[Config Manager]
     end
-    
-    subgraph "Intelligence Layer"
-        P1[Price Engine<br>(LSTM + Heston MC)]
-        P2[Sentiment Engine<br>(FinBERT + Pipeline)]
+
+    subgraph "🧠 Intelligence Layer"
+        subgraph "P1: Price Engine"
+            LSTM[LSTM Model]
+            MC[Monte Carlo<br/>Heston]
+        end
+        subgraph "P2: Sentiment Engine"
+            FB[FinBERT]
+            PL[Pipeline<br/>+ Fetchers]
+        end
     end
-    
-    subgraph "Data Layer"
-        KG[(Neo4j Knowledge Graph)]
-        RE[Recall Engine<br>(Vector/SQL)]
+
+    subgraph "💾 Data Layer"
+        KG[(Neo4j<br/>Knowledge Graph)]
+        RE[(Recall Engine<br/>SQLite Cache)]
     end
-    
-    User --> SL & GR
+
     SL & GR --> ORC
-    ORC --> P1 & P2
-    P1 & P2 --> KG
+    ORC --> CFG
+    ORC --> LSTM & FB
+    LSTM --> MC
+    FB --> PL
+    LSTM & FB --> KG
     SL --> RE
 ```
 
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as App Layer
+    participant O as Orchestrator
+    participant P1 as Price Engine
+    participant P2 as Sentiment Engine
+    participant KG as Knowledge Graph
+
+    U->>A: Enter Stock Symbol
+    A->>O: compute_state(symbol, days)
+    O->>P1: build_price_intelligence()
+    O->>P2: build_sentiment_intelligence()
+    P1-->>O: trend, forecast, VaR
+    P2-->>O: DSP score, aspects
+    O->>KG: write_snapshot(state)
+    O-->>A: Combined State
+    A-->>U: Visualizations + Insights
+```
+
+---
+
 ## 📂 Project Structure
 
-| Directory | Component | Description |
-|-----------|-----------|-------------|
-| **`app/`** | Application Layer | Entry points for granular UI experiences. |
-| **`core/`** | Core Logic | Shared configuration, state orchestration, and utilities. |
-| **`intelligence/`** | Intelligence Engines | **P1 (Price)**: Deep learning models.<br>**P2 (Sentiment)**: NLP pipelines. |
-| **`kg/`** | Knowledge Graph | Neo4j writers, schema definitions, and state adapters. |
-| **`recall_engine/`** | Recall & Chat | RAG systems, LLM query generation, and conversation state. |
+```
+finwise_core/
+├── 📁 app/                     # Application Entry Points
+│   ├── streamlit_app.py        # Conversational UI (Recall + Chat)
+│   └── gradio_app.py           # Risk Terminal (Charts + Monte Carlo)
+│
+├── 📁 core/                    # Shared Core Modules
+│   ├── config.py               # Configuration constants
+│   └── orchestrator.py         # State computation logic
+│
+├── 📁 intelligence/            # Intelligence Engines
+│   ├── 📁 price/               # P1: Price Intelligence
+│   │   ├── adapter.py          # Thin adapter layer
+│   │   ├── predictor.py        # LSTM + Monte Carlo logic
+│   │   └── stock_price_model.h5
+│   │
+│   └── 📁 sentiment/           # P2: Sentiment Intelligence
+│       ├── adapter.py          # Thin adapter layer
+│       ├── pipeline.py         # Main sentiment pipeline
+│       ├── fetchers.py         # News/Reddit/RSS fetchers
+│       └── models.py           # FinBERT + spaCy models
+│
+├── 📁 kg/                      # Knowledge Graph
+│   ├── kg_writer.py            # Neo4j write operations
+│   ├── kg_schema.py            # Graph schema definitions
+│   └── state_adapter.py        # State transformation
+│
+├── 📁 recall_engine/           # Conversational AI (READ-ONLY)
+│   ├── chatbot.py              # Gemini chat functions
+│   ├── conversation_manager.py # Session state
+│   ├── database_manager.py     # Neo4j read queries
+│   ├── llm_query_generator.py  # NL → Cypher
+│   ├── nlp_processor.py        # Entity extraction
+│   └── query_generator.py      # Query orchestration
+│
+├── .env.example                # Environment template
+├── .gitignore                  # Git ignore rules
+├── requirements.txt            # Dependencies
+└── README.md                   # This file
+```
 
 ---
 
 ## 🚀 Key Features
 
-### 1. 📈 Probabilistic Price Intelligence (P1)
-- **Deep Learning**: LSTM-based price forecasting trained on 3+ years of OHLCV data.
-- **Risk Modeling**: Heston Stochastic Volatility Monte Carlo simulations (5000+ paths).
-- **Regime Awareness**: Automatic detection of Bullish, Bearish, or Sideways market regimes.
-- **Asset Context**: Relative Value at Risk (VaR) calculation.
+### 1. Price Intelligence (P1)
 
-### 2. 🧠 Semantic Sentiment Intelligence (P2)
-- **FinBERT Integration**: Institutional-grade sentiment analysis tailored for financial texts.
-- **R2 Relevance Filter**: Smart filtering to exclude noise (marketing, SEO spam, non-financial news).
-- **Aspect-Based Analysis**: Decomposes news into factors like *Earnings*, *Litigation*, *M&A*, etc.
-- **Impact Scoring**: Weighted scoring based on source credibility, recency, and specific entity mentions.
+| Feature | Description |
+|---------|-------------|
+| **LSTM Forecasting** | 60-day lookback, walk-forward prediction |
+| **Heston Monte Carlo** | 5000+ simulation paths with stochastic volatility |
+| **Regime Detection** | Automatic Bullish/Bearish/Sideways classification |
+| **VaR Calculation** | 5% Value at Risk with asset-relative percentile |
 
-### 3. 🕸️ Knowledge Graph (KG)
-- **Neo4j AuraDB**: graph-native storage for complex relationships (Company -> Metric -> Value).
-- **Temporal Tracking**: Tracks financial state snapshots over time.
+### 2. Sentiment Intelligence (P2)
 
-### 4. 🗣️ Conversational AI (Recall)
-- **Gemini Pro Integration**: Context-aware chat assistant for financial queries.
-- **Natural Language Querying**: Converts user questions ("How is Apple doing?") into precise database queries.
+| Feature | Description |
+|---------|-------------|
+| **FinBERT Scoring** | Financial domain-specific sentiment |
+| **R2 Relevance Filter** | Removes SEO spam, marketing, non-financial noise |
+| **Aspect Analysis** | Earnings, Litigation, M&A, Product, Leadership |
+| **Source Weighting** | SEC EDGAR > Reuters > NewsAPI > Social |
+
+### 3. Knowledge Graph
+
+| Feature | Description |
+|---------|-------------|
+| **Neo4j AuraDB** | Cloud-native graph database |
+| **Temporal Snapshots** | Track financial state over time |
+| **Parameterized Queries** | Secure Cypher execution |
+
+### 4. Conversational AI
+
+| Feature | Description |
+|---------|-------------|
+| **Gemini Pro** | Context-aware financial assistant |
+| **NL → Cypher** | "How is Apple doing?" → Database query |
+| **Session Memory** | Multi-turn conversation support |
 
 ---
 
-## 🛠️ Installation
+## 🛠 Installation
 
 ### Prerequisites
-- Python 3.12+
-- Git
-- Neo4j AuraDB Instance
-- Google Gemini API Key
 
-### Setup
+| Requirement | Version |
+|-------------|---------|
+| Python | 3.12+ |
+| Git | 2.x |
+| Neo4j AuraDB | Free tier works |
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-org/finwise_core.git
-   cd finwise_core
-   ```
+### Step-by-Step Setup
 
-2. **Create a Virtual Environment**
-   ```bash
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1   # Windows
-   ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/Raghavan-27-5/complete-finwise-system.git
+cd complete-finwise-system
 
-3. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   python -m textblob.download_corpora
-   ```
+# 2. Create virtual environment
+python -m venv .venv
 
-4. **Configure Environment**
-   - Copy `.env.example` to `.env`.
-   - Fill in your API keys (Neo4j, Gemini, NewsAPI).
+# 3. Activate (Windows PowerShell)
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 
-   ```bash
-   cp .env.example .env
-   ```
+# 4. Install dependencies
+pip install -r requirements.txt
+
+# 5. Download NLP models
+python -m textblob.download_corpora
+python -m spacy download en_core_web_md
+
+# 6. Configure environment
+copy .env.example .env
+# Edit .env with your API keys
+```
 
 ---
 
-## 🖥️ Usage
+## 🖥 Usage
 
-Run the module corresponding to your role:
-
-### 1. Analyst Chat Interface (Streamlit)
-*Best for: Deep dives, conversational research, database querying.*
+### Option 1: Streamlit Chat Interface
+*Best for: Deep research, conversational queries, database exploration*
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-### 2. Quant Risk Terminal (Gradio)
-*Best for: Fast lookup, risk metrics, technical charts, Monte Carlo visualization.*
+### Option 2: Gradio Risk Terminal
+*Best for: Quick lookups, risk metrics, Monte Carlo visualization*
 
 ```bash
 python app/gradio_app.py
 ```
 
----
-
-## 🤝 Contribution (Internal)
-
-1. **Strict Git Discipline**: Meaningful commit messages are mandatory.
-2. **Modular Dev**: Place new intelligence logic in `intelligence/` (create P3, P4 if needed).
-3. **No Direct Database Writes**: Use the `kg_writer` module.
+| Interface | URL | Use Case |
+|-----------|-----|----------|
+| Streamlit | `http://localhost:8501` | Research & Chat |
+| Gradio | `http://localhost:7860` | Risk & Quant |
 
 ---
 
-*© 2024 FinWise Financial Intelligence. Internal Use Only.*
+## 🔑 API Keys Required
+
+Configure these in your `.env` file:
+
+| Key | Required | Source |
+|-----|----------|--------|
+| `AURA_CONNECTION_URI` | ✅ | [Neo4j Aura](https://neo4j.com/cloud/aura/) |
+| `AURA_USERNAME` | ✅ | Neo4j Aura |
+| `AURA_PASSWORD` | ✅ | Neo4j Aura |
+| `GEMINI_API_KEY` | ✅ | [Google AI Studio](https://aistudio.google.com/) |
+| `NEWS_API_KEY` | ✅ | [NewsAPI](https://newsapi.org/) |
+| `ALPHA_KEY` | ❌ | [Alpha Vantage](https://www.alphavantage.co/) |
+| `REDDIT_CLIENT_ID` | ❌ | [Reddit Apps](https://www.reddit.com/prefs/apps) |
+
+---
+
+## 🤝 Contributing
+
+### Development Guidelines
+
+| Rule | Description |
+|------|-------------|
+| **Git Discipline** | Meaningful commit messages required |
+| **Modular Design** | New engines go in `intelligence/` (P3, P4, etc.) |
+| **Read-Only Recall** | Never add write operations to `recall_engine/` |
+| **Adapter Pattern** | Use thin adapters between layers |
+
+### Commit Message Format
+
+```
+Type: Short description
+
+Types: Feat, Fix, Docs, Refactor, Test, Chore
+```
+
+---
+
+<p align="center">
+  <strong>© 2024 FinWise Financial Intelligence</strong><br/>
+  <em>Internal Use Only</em>
+</p>
