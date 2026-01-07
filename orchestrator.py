@@ -1,24 +1,35 @@
 # orchestrator.py
+from datetime import datetime, timezone
 from backend_p1 import build_price_intelligence
 from backend_p2 import build_sentiment_intelligence
+from kg.state_adapter import adapt_state
 
 
-def compute_state(symbol: str, days: int):
+def compute_state(symbol: str, days: int, kg_writer):
     p1 = build_price_intelligence(symbol, days)
     p2 = build_sentiment_intelligence(symbol, days)
 
-    return {
+    raw_state = {
         "symbol": symbol,
-
-        # ---- PRICE INTELLIGENCE (REAL FINWISE) ----
-        "history": p1["history"],          # actual vs predicted
-        "forecast": p1["forecast"],        # LSTM future
-        "monte_carlo": p1["monte_carlo"],  # Heston-like MC
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "price": {
+            "trend": p1["trend"],
+            "forecast_slope": p1.get("forecast_slope"),
+            "downside_risk": p1.get("downside_risk"),
+        },
+        "sentiment": {
+            "global_score": p2["global_score"],
+            "label": p2.get("label"),
+            "aspects": p2["aspects"],
+        },
+        "history": p1["history"],
+        "forecast": p1["forecast"],
+        "monte_carlo": p1["monte_carlo"],
         "indicators": p1["indicators"],
-        "trend": p1["trend"],
-
-        "sentiment_score": p2["global_score"],
-        "sentiment_aspects": p2["aspects"],
         "articles": p2.get("impact_articles", []),
-
     }
+
+    state = adapt_state(raw_state)
+    kg_writer.write_snapshot(state)
+
+    return raw_state
