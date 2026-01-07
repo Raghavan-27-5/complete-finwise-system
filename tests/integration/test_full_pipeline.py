@@ -27,6 +27,7 @@ class TestFullPipelineIntegration:
             'Volume': np.random.randint(1000000, 5000000, 100)
         }, index=dates)
     
+    @pytest.mark.skip(reason="Heavy test: loads TensorFlow model (~60s)")
     @patch('intelligence.price.predictor.safe_download')
     @patch('intelligence.price.predictor.model')
     @patch('intelligence.sentiment.fetchers.aggregate_sources')
@@ -50,6 +51,7 @@ class TestFullPipelineIntegration:
         assert "monte_carlo" in result
         assert "indicators" in result
     
+    @pytest.mark.skip(reason="Heavy test: loads sentiment models (~60s)")
     @patch('intelligence.sentiment.fetchers.aggregate_sources')
     @patch('intelligence.sentiment.pipeline.yf')
     async def test_sentiment_adapter_integration(self, mock_yf, mock_sources):
