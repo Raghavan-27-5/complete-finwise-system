@@ -1,32 +1,55 @@
+# FinWise Core Dependencies
+# ===========================
+
+# --- Web Framework ---
 fastapi
 uvicorn[standard]
+streamlit
+
+# --- HTTP & Networking ---
 requests
+aiohttp
+httpx
+ratelimit
+
+# --- Data Processing ---
 pandas
 numpy
+
+# --- ML/Statistical ---
 scikit-learn
 statsmodels
 arch
-yfinance
+tensorflow
+
+# --- NLP ---
 torch
 transformers
 sentence-transformers
-spacy==3.7.2
-lime
-Pillow
-aiohttp
-ratelimit
+spacy==3.7.6
+
+# --- Finance ---
+yfinance
+ta
+plotly
+
+# --- Database ---
+neo4j
+
+# --- Data Sources ---
 feedparser
 praw
 beautifulsoup4
-python-dateutil
-httpx
-pytest
-pytest-asyncio
-tqdm
 PyPDF2
-accelerate
-bitsandbytes
+
+# --- Utilities ---
+python-dateutil
+python-dotenv
+tqdm
+Pillow
+
+# --- LLM ---
+google-generativeai
+
+# --- UI ---
 gradio
-plotly
-ta
-tensorflow
