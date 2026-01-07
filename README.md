@@ -288,6 +288,6 @@ Types: Feat, Fix, Docs, Refactor, Test, Chore
 ---
 
 <p align="center">
-  <strong>© 2024 FinWise Financial Intelligence</strong><br/>
+  <strong>© 2025 FinWise Financial Intelligence</strong><br/>
   <em>Internal Use Only</em>
 </p>
