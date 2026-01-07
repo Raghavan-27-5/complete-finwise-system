@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from functools import lru_cache
-from config import REDDIT_SUBREDDITS
+from core.config import REDDIT_SUBREDDITS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

@@ -33,7 +33,7 @@ from statsmodels.tsa.stattools import grangercausalitytests
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
 
-from config import (
+from core.config import (
     BASE_SOURCE_WEIGHTS,
     ASPECT_CATEGORIES,
     ASPECT_KEYWORDS,
@@ -42,8 +42,8 @@ from config import (
     SOURCE_NAME_MAP
 )
 
-from fetchers import aggregate_sources
-from models import (
+from intelligence.sentiment.fetchers import aggregate_sources
+from intelligence.sentiment.models import (
     nlp,
     extract_aspects_from_doc,
     compute_ensemble_sentiment,

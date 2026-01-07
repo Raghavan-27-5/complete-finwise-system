@@ -1,5 +1,5 @@
 # backend_p2.py
-from pipeline import get_news_sentiment_async, _run_async
+from intelligence.sentiment.pipeline import get_news_sentiment_async, _run_async
 
 def build_sentiment_intelligence(stock_symbol: str, days: int = 7):
     """

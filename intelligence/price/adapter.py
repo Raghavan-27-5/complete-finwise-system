@@ -2,7 +2,7 @@
 # PM-GRADE THIN ADAPTER
 # NO LOGIC, NO MATH, NO INDICATORS HERE
 
-from upd_final_app import build_price_block
+from intelligence.price.predictor import build_price_block
 
 
 def build_price_intelligence(symbol: str, days: int):

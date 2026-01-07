@@ -15,7 +15,7 @@ from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification
 )
-from config import ASPECT_CATEGORIES, ASPECT_KEYWORDS
+from core.config import ASPECT_CATEGORIES, ASPECT_KEYWORDS
 # optional
 try:
     from langdetect import detect

@@ -1,7 +1,7 @@
 # orchestrator.py
 from datetime import datetime, timezone
-from backend_p1 import build_price_intelligence
-from backend_p2 import build_sentiment_intelligence
+from intelligence.price.adapter import build_price_intelligence
+from intelligence.sentiment.adapter import build_sentiment_intelligence
 from kg.state_adapter import adapt_state
 
 

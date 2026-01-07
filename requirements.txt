@@ -21,12 +21,14 @@ scikit-learn
 statsmodels
 arch
 tensorflow
+tf-keras
 
 # --- NLP ---
 torch
 transformers
 sentence-transformers
 spacy==3.7.6
+textblob
 
 # --- Finance ---
 yfinance
