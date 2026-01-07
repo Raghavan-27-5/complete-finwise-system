@@ -1,5 +1,5 @@
 from typing import List, Dict
-from modules.conversation_manager import ConversationContext
+from recall_engine.conversation_manager import ConversationContext
 import logging
 
 logger = logging.getLogger(__name__)

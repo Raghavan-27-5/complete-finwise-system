@@ -1,3 +1,8 @@
+import os
+import sys
+# Ensure project root is in sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import gradio as gr
 import pandas as pd
 import plotly.graph_objects as go

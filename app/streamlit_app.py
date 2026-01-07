@@ -1,4 +1,8 @@
 import os
+import sys
+# Ensure project root is in sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import logging
 from typing import Dict, Any, List, Tuple
 import streamlit as st

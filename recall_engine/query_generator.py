@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Tuple
-from modules.llm_query_generator import LLMQueryGenerator
+from recall_engine.llm_query_generator import LLMQueryGenerator
 
 class QueryGenerator:
     def __init__(self, model):

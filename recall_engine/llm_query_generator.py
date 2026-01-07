@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Tuple
-from modules.chatbot import chatbot_no_context
+from recall_engine.chatbot import chatbot_no_context
 import json
 import logging
 import re
