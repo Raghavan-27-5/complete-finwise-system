@@ -51,7 +51,8 @@ tqdm
 Pillow
 
 # --- LLM ---
-google-generativeai
+google-generativeai  # Legacy, deprecated
+openai               # For OpenRouter API
 
 # --- UI ---
 gradio
