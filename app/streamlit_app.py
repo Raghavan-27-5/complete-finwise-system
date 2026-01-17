@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Tuple
 import streamlit as st
 import pandas as pd
 from neo4j import GraphDatabase
-import google.generativeai as genai
+from core.llm_provider import get_llm_client
 from datetime import datetime
 from recall_engine.database_manager import DatabaseManager
 from recall_engine.conversation_manager import Conversation, ConversationContext, save_conversation, load_conversation
@@ -25,10 +25,7 @@ logger = logging.getLogger(__name__)
 AURA_CONNECTION_URI = os.environ.get("AURA_CONNECTION_URI")
 AURA_USERNAME = os.environ.get("AURA_USERNAME")
 AURA_PASSWORD = os.environ.get("AURA_PASSWORD")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# Configure the Gemini client
-genai.configure(api_key=GEMINI_API_KEY)
+# LLM client will be initialized in FinWiseApp.__init__
 
 def create_driver(uri: str, username: str, password: str):
     try:
@@ -41,7 +38,7 @@ class FinWiseApp:
     def __init__(self):
         self.driver = create_driver(AURA_CONNECTION_URI, AURA_USERNAME, AURA_PASSWORD)
         self.kg_writer = KGWriter(self.driver)
-        self.model = genai.GenerativeModel('gemini-1.0-pro')
+        self.model = get_llm_client()  # Auto-selects OpenRouter or Gemini
         self.query_generator = QueryGenerator(self.model)
         self.initialize_session_state()
 
