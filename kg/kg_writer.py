@@ -4,9 +4,11 @@ from kg.kg_schema import (
     NODE_SNAPSHOT,
     NODE_SIGNAL,
     NODE_ASPECT,
+    NODE_COMPANY,
     REL_HAS_SNAPSHOT,
     REL_HAS_SIGNAL,
     REL_OF_ASPECT,
+    REL_ISSUED,
 )
 
 
@@ -19,6 +21,16 @@ class KGWriter:
             with session.begin_transaction() as tx:
                 tx.run(
                     f"MERGE (s:{NODE_STOCK} {{symbol: $symbol}})",
+                    symbol=state.symbol,
+                )
+
+                tx.run(
+                    f"""
+                    MERGE (c:{NODE_COMPANY} {{symbol: $symbol}})
+                    WITH c
+                    MATCH (s:{NODE_STOCK} {{symbol: $symbol}})
+                    MERGE (c)-[:{REL_ISSUED}]->(s)
+                    """,
                     symbol=state.symbol,
                 )
 

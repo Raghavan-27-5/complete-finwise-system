@@ -130,33 +130,37 @@ def predict_future(model, df, scaler, prediction_days, include_last_n=3):
     last_window_scaled = scaler.transform(last_window.reshape(-1, 1))
 
     # Create empty lists to store the future predictions and dates
-    future_predictions = []
+    # future_predictions = []
     future_dates = []
 
     # Get the last known date from the dataframe
     last_date = df.index[-1]
 
-    # Start the prediction loop
-    for _ in range(int(prediction_days)):
-        # Reshape the window to match the model's expected input shape
-        current_window_reshaped = last_window_scaled.reshape(1, TIME_STEP, 1)
+    # --- F3 FIX: Single-Step Prediction ---
+    # We predict ONLY t+1 to avoid recursive error accumulation.
+    # The result is projected flat for the requested horizon.
+    
+    # 1. Get the last window
+    scaled_data = scaler.fit_transform(df['Close'].values.reshape(-1, 1))
+    last_window = scaled_data[-60:]
+    last_window_reshaped = np.reshape(last_window, (1, last_window.shape[0], 1))
+    
+    # 2. Predict once
+    next_scaled_pred = model.predict(last_window_reshaped, verbose=0)
+    next_price = scaler.inverse_transform(next_scaled_pred)[0][0]
+    
+    # 3. Project flat
+    future_predictions = [next_price] * prediction_days
+    
+    # Generate dates
+    future_dates = []
+    current_date = df.index[-1]
+    for _ in range(prediction_days):
+        current_date = next_trading_day(current_date)
+        future_dates.append(current_date)
 
-        # Predict the next day's scaled price
-        next_scaled_pred = model.predict(current_window_reshaped, verbose=0)[0, 0]
-
-        # Inverse transform the prediction to get the actual price
-        next_price = scaler.inverse_transform(np.array([[next_scaled_pred]]))[0, 0]
-        future_predictions.append(next_price)
-
-        # Find the next trading day (skips weekends)
-        last_date = next_trading_day(last_date)
-        future_dates.append(last_date)
-
-        # --- This is the key "walk-forward" step ---
-        # Update the window: drop the oldest price and append the newest prediction
-        last_window_scaled = np.append(last_window_scaled[1:], [[next_scaled_pred]], axis=0)
-
-    # Combine the last few days of real data with our new predictions for a continuous plot
+    # 4. Construct result arrays
+    # Combine the last few days of real data with our flat projection
     final_prices = np.concatenate([df['Close'].values[-include_last_n:], future_predictions])
     final_dates = list(df.index[-include_last_n:]) + future_dates
     
@@ -253,6 +257,11 @@ def monte_carlo_heston(
       fig -> Plotly figure (sample_paths plotted for clarity)
       stats_str -> small string with mean / 5% / 95% for final-day distribution
     """
+    """
+    Returns:
+      fig -> Plotly figure (sample_paths plotted for clarity)
+      stats_str -> small string with mean / 5% / 95% for final-day distribution
+    """
     import yfinance as yf
     import numpy as np
     import plotly.graph_objects as go
@@ -260,7 +269,7 @@ def monte_carlo_heston(
     # Safety: force at least 2 days for plotting and avoid 1-day mismatches
     days = max(int(days), 2)
 
-    # Fetch recent returns to calibrate short-term variance
+    # Fetch recent returns to calibrate volatility (Realized Volatility)
     try:
         stock_df = safe_download(
                    stock_symbol,
@@ -269,53 +278,47 @@ def monte_carlo_heston(
         )
 
         returns = np.log(stock_df['Close'] / stock_df['Close'].shift(1)).dropna()
-        sigma0 = returns.std() if len(returns) > 0 else 0.02
+        # Daily volatility
+        sigma_daily = returns.std() if len(returns) > 0 else 0.02
     except Exception:
-        sigma0 = 0.02
+        sigma_daily = 0.02
 
-    # Anchor drift to LSTM forecast (log-return)
-    # If lstm_forecast equals last_price, drift = 0
+    # Calculate Drift required to hit LSTM forecast (Geometric Drift)
     lstm_forecast = float(lstm_forecast)
     last_price = float(last_price)
-    mu = 0.0
-    if last_price > 0:
-        mu = np.log(max(lstm_forecast, 1e-8) / last_price)
+    
+    daily_drift = 0.0
+    if last_price > 0 and days > 0:
+        # Total log return required / number of days
+        daily_drift = np.log(max(lstm_forecast, 1e-8) / last_price) / days
 
-    # Heston-ish params tuned for short-term stability
-    dt = 1/252.0
-    prices = np.zeros((n_simulations, days))
-    vol = np.zeros((n_simulations, days))
-    prices[:, 0] = last_price
-    # Use sigma0 (daily std dev) as starting volatility
-    vol[:, 0] = np.maximum(sigma0, 1e-4)
-
-    # Parameters (conservative short-term)
-    kappa = 2.0       # mean reversion speed
-    theta_h = vol[:,0].mean()**2  # long-term variance (squared vol)
-    xi = 0.15         # vol of vol (smaller for short-term)
-    rho = -0.4        # correlation between asset & vol
-    jump_prob = 0.005
-    jump_mu = 0.0
-    jump_sigma = 0.015
-
-    for t in range(1, days):
-        z1 = np.random.normal(0, 1, n_simulations)
-        z2 = np.random.normal(0, 1, n_simulations)
-        # correlate
-        z2 = rho * z1 + np.sqrt(max(0.0, 1 - rho**2)) * z2
-
-        # variance (Euler discretization of square-root like process)
-        prev_v = vol[:, t-1]
-        v_next = prev_v + kappa * (theta_h - prev_v) * dt + xi * np.sqrt(np.maximum(prev_v * dt, 0.0)) * z2
-        v_next = np.maximum(v_next, 1e-8)  # keep positive
-        vol[:, t] = v_next
-
-        # jump component (multiplicative)
-        jumps = np.random.binomial(1, jump_prob, n_simulations)
-        jump_effect = jumps * np.random.normal(jump_mu, jump_sigma, n_simulations)
-
-        # price update (log-normal with stochastic variance)
-        prices[:, t] = prices[:, t-1] * np.exp(mu * dt - 0.5 * v_next * dt + np.sqrt(v_next * dt) * z1 + jump_effect)
+    # ----------------- GBM SIMULATION -----------------
+    # Model: P_t = P_{t-1} * exp( r_t )
+    # r_t ~ N(daily_drift - 0.5*sigma^2, sigma) ? 
+    # To keep it simple and centered on LSTM forecast:
+    # We sample log-returns around the required drift.
+    
+    # Generate random log-returns
+    # Shape: (n_simulations, days)
+    # We apply the drift needed to reach target on average, plus volatility noise.
+    # Note: If we want E[P_T] = Forecast, we need to adjust for Jensen's inequality,
+    # but for a "cone" visualization, direct log-normal sampling centered on drift is standard.
+    
+    # Random component: N(0, 1) * sigma
+    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * sigma_daily
+    
+    # Path evolution
+    log_returns = daily_drift + random_shocks
+    
+    # Cumulative log returns
+    cum_log_returns = np.cumsum(log_returns, axis=1)
+    
+    # Prices
+    prices = last_price * np.exp(cum_log_returns)
+    
+    # Prepend starting price for plotting
+    start_col = np.full((n_simulations, 1), last_price)
+    prices = np.hstack([start_col, prices])
 
     # Stats on final-day distribution
     final_prices = prices[:, -1]
@@ -323,26 +326,30 @@ def monte_carlo_heston(
     mc_p5 = np.percentile(final_prices, 5)
     mc_p95 = np.percentile(final_prices, 95)
 
-    stats_str = f"MC final day — mean: {mc_mean:.2f}, 5%: {mc_p5:.2f}, 95%: {mc_p95:.2f}"
+    stats_str = f"Simulated final day — mean: {mc_mean:.2f}, 5%: {mc_p5:.2f}, 95%: {mc_p95:.2f}"
 
     # Build Plotly figure (plot only sample_paths)
-    x_axis = list(range(1, prices.shape[1] + 1))
+    x_axis = list(range(0, days + 1))
     fig = go.Figure()
-    for i in range(min(sample_paths, n_simulations)):
-        fig.add_trace(go.Scatter(x=x_axis, y=prices[i], mode='lines',
+    
+    # Plot a subset of paths
+    subset = prices[:min(sample_paths, n_simulations)]
+    for i in range(len(subset)):
+        fig.add_trace(go.Scatter(x=x_axis, y=subset[i], mode='lines',
                                  line=dict(width=1, color='gray'), opacity=0.35, showlegend=False))
+                                 
     mean_path = np.mean(prices, axis=0)
     upper_bound = np.percentile(prices, 97.5, axis=0)
     lower_bound = np.percentile(prices, 2.5, axis=0)
 
-    fig.add_trace(go.Scatter(x=x_axis, y=mean_path, mode="lines", name="Mean Forecast",
+    fig.add_trace(go.Scatter(x=x_axis, y=mean_path, mode="lines", name="Mean Projection",
                              line=dict(color="white", width=3)))
-    fig.add_trace(go.Scatter(x=x_axis, y=upper_bound, mode="lines", name="Upper 97.5%",
+    fig.add_trace(go.Scatter(x=x_axis, y=upper_bound, mode="lines", name="Upper Vol Cone (97.5%)",
                              line=dict(color="lightgreen", dash='dot')))
-    fig.add_trace(go.Scatter(x=x_axis, y=lower_bound, mode="lines", name="Lower 2.5%",
+    fig.add_trace(go.Scatter(x=x_axis, y=lower_bound, mode="lines", name="Lower Vol Cone (2.5%)",
                              line=dict(color="lightcoral", dash='dot')))
 
-    fig.update_layout(title=f"Advanced Monte Carlo (Heston-like) for {stock_symbol}",
+    fig.update_layout(title=f"Volatility Cone Simulation (GBM) for {stock_symbol}",
                       xaxis_title="Days Ahead", yaxis_title="Price",
                       template="plotly_dark", height=520)
 
@@ -373,12 +380,10 @@ def monte_carlo_heston_stats_only(
             auto_adjust=True,
         )
         returns = np.log(stock_df['Close'] / stock_df['Close'].shift(1)).dropna()
-        realized_vol = returns.std() * np.sqrt(252) if len(returns) > 0 else 0.20
+        # Daily volatility
+        sigma_daily = returns.std() if len(returns) > 0 else 0.02
     except Exception:
-        realized_vol = 0.20
-
-    # Volatility stress multiplier (PM clamp)
-    vol_multiplier = np.clip(realized_vol / 0.20, 1.0, 3.0)
+        sigma_daily = 0.02
 
     # -------------------------------
     # 2) Drift from LSTM anchor
@@ -386,61 +391,29 @@ def monte_carlo_heston_stats_only(
     lstm_forecast = float(lstm_forecast)
     last_price = float(last_price)
 
-    mu = 0.0
-    if last_price > 0:
-        mu = np.log(max(lstm_forecast, 1e-8) / last_price)
+    daily_drift = 0.0
+    if last_price > 0 and days > 0:
+        daily_drift = np.log(max(lstm_forecast, 1e-8) / last_price) / days
 
     # -------------------------------
-    # 3) Monte Carlo simulation
+    # 3) GBM Simulation
     # -------------------------------
-    dt = 1 / 252.0
-    prices = np.zeros((n_simulations, days))
-    vol = np.zeros((n_simulations, days))
-
-    prices[:, 0] = last_price
-    init_vol = float(realized_vol) / np.sqrt(252)
-    vol[:, 0] = max(init_vol, 1e-4)
-
-
-    kappa = 2.0
-    theta_h = vol[:, 0].mean() ** 2
-    xi = 0.15
-    rho = -0.4
-    jump_prob = 0.005
-    jump_mu = 0.0
-    jump_sigma = 0.015
-
-    for t in range(1, days):
-        z1 = np.random.normal(0, 1, n_simulations)
-        z2 = np.random.normal(0, 1, n_simulations)
-        z2 = rho * z1 + np.sqrt(max(0.0, 1 - rho**2)) * z2
-
-        prev_v = vol[:, t - 1]
-        v_next = prev_v + kappa * (theta_h - prev_v) * dt \
-                 + xi * np.sqrt(np.maximum(prev_v * dt, 0.0)) * z2
-        v_next = np.maximum(v_next, 1e-8)
-        vol[:, t] = v_next
-
-        jumps = np.random.binomial(1, jump_prob, n_simulations)
-        jump_effect = jumps * np.random.normal(jump_mu, jump_sigma, n_simulations)
-
-        prices[:, t] = prices[:, t - 1] * np.exp(
-            mu * dt - 0.5 * v_next * dt
-            + np.sqrt(v_next * dt) * z1
-            + jump_effect
-        )
+    # Generate cumulative log returns
+    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * sigma_daily
+    log_returns = daily_drift + random_shocks
+    cum_log_returns = np.cumsum(log_returns, axis=1)
+    
+    # Final prices
+    final_prices = last_price * np.exp(cum_log_returns[:, -1])
 
     # -------------------------------
-    # 4) Downside risk extraction
+    # 4) Downside Risk Calc
     # -------------------------------
-    final_prices = prices[:, -1]
-    p5 = float(np.percentile(final_prices, 5))
+    # Probability of loss > 5%
+    downside_threshold = last_price * 0.95
+    p_loss = np.mean(final_prices < downside_threshold)
 
-    base_downside = max(0.0, (last_price - p5) / last_price)
-    downside_risk = float(base_downside) * float(vol_multiplier)
-    downside_risk = min(downside_risk, 0.50)
-
-    return float(downside_risk)
+    return float(min(p_loss, 0.50))
 
 
 

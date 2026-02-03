@@ -13,193 +13,62 @@ class QueryGenerator:
     def generate_db_schema(self) -> str:
         return """
             {
-        HAS_REPORT: {
-            count: 10,
-            properties: {},
-            type: "relationship"
-        },
-        HAS_VALUE: {
-            count: 390,
-            properties: {},
-            type: "relationship"
-        },
-        MetricValue: {
-            count: 390,
-            labels: [],
-            properties: {
-            value: {
-                unique: false,
-                indexed: false,
-                type: "FLOAT",
-                existence: false
-            },
-            date: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            }
-            },
+        Stock: {
             type: "node",
-            relationships: {
-            HAS_VALUE: {
-                count: 390,
-                direction: "in",
-                labels: ["Metric"],
-                properties: {}
-            },
-            OF_METRIC: {
-                count: 0,
-                direction: "out",
-                labels: ["Metric"],
-                properties: {}
-            }
-            }
-        },
-        Metric: {
-            count: 6,
-            labels: [],
+            labels: ["Stock"],
             properties: {
-            unit: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
+                symbol: { type: "STRING", unique: true }
             },
-            description: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            },
-            name: {
-                unique: true,
-                indexed: true,
-                type: "STRING",
-                existence: false
-            }
-            },
-            type: "node",
             relationships: {
-            HAS_VALUE: {
-                count: 0,
-                direction: "out",
-                labels: ["MetricValue"],
-                properties: {}
-            },
-            HAS_METRIC: {
-                count: 390,
-                direction: "in",
-                labels: ["Company"],
-                properties: {}
-            },
-            OF_METRIC: {
-                count: 390,
-                direction: "in",
-                labels: ["MetricValue"],
-                properties: {}
-            }
-            }
-        },
-        HAS_METRIC: {
-            count: 390,
-            properties: {},
-            type: "relationship"
-        },
-        Report: {
-            count: 10,
-            labels: [],
-            properties: {
-            id: {
-                unique: true,
-                indexed: true,
-                type: "STRING",
-                existence: false
-            },
-            content: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            },
-            date: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            },
-            type: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            }
-            },
-            type: "node",
-            relationships: {
-            HAS_REPORT: {
-                count: 10,
-                direction: "in",
-                labels: ["Company"],
-                properties: {}
-            }
+                HAS_SNAPSHOT: { direction: "out", labels: ["Snapshot"] },
+                ISSUED: { direction: "in", labels: ["Company"] }
             }
         },
         Company: {
-            count: 5,
-            labels: [],
-            properties: {
-            location: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            },
-            name: {
-                unique: true,
-                indexed: true,
-                type: "STRING",
-                existence: false
-            },
-            industry: {
-                unique: false,
-                indexed: false,
-                type: "STRING",
-                existence: false
-            },
-            revenue: {
-                unique: false,
-                indexed: false,
-                type: "INTEGER",
-                existence: false
-            },
-            employees: {
-                unique: false,
-                indexed: false,
-                type: "INTEGER",
-                existence: false
-            }
-            },
             type: "node",
-            relationships: {
-            HAS_REPORT: {
-                count: 0,
-                direction: "out",
-                labels: ["Report"],
-                properties: {}
+            labels: ["Company"],
+            properties: {
+                symbol: { type: "STRING", unique: true }
             },
-            HAS_METRIC: {
-                count: 0,
-                direction: "out",
-                labels: ["Metric"],
-                properties: {}
-            }
+            relationships: {
+                ISSUED: { direction: "out", labels: ["Stock"] }
             }
         },
-        OF_METRIC: {
-            count: 390,
-            properties: {},
-            type: "relationship"
+        Snapshot: {
+            type: "node",
+            labels: ["Snapshot"],
+            properties: {
+                symbol: { type: "STRING", unique: true },
+                as_of: { type: "STRING", unique: true }
+            },
+            relationships: {
+                HAS_SIGNAL: { direction: "out", labels: ["Signal"] },
+                HAS_SNAPSHOT: { direction: "in", labels: ["Stock"] }
+            }
+        },
+        Signal: {
+            type: "node",
+            labels: ["Signal"],
+            properties: {
+                name: { type: "STRING" },
+                value: { type: "FLOAT" },
+                direction: { type: "STRING" },
+                as_of: { type: "STRING" }
+            },
+            relationships: {
+                HAS_SIGNAL: { direction: "in", labels: ["Snapshot"] },
+                OF_ASPECT: { direction: "out", labels: ["Aspect"] }
+            }
+        },
+        Aspect: {
+            type: "node",
+            labels: ["Aspect"],
+            properties: {
+                name: { type: "STRING", unique: true }
+            },
+            relationships: {
+                OF_ASPECT: { direction: "in", labels: ["Signal"] }
+            }
         }
         }
     """

@@ -10,6 +10,10 @@ class DatabaseManager:
         self.driver = driver
 
     def execute_query(self, query: str, params: Dict[str, Any] = {}) -> List[Dict[str, Any]]:
+        if not self._verify_read_only(query):
+            logger.error(f"Security violation: unsafe query blocked: {query}")
+            return []
+
         try:
             with self.driver.session() as session:
                 result = session.run(query, params)
@@ -19,6 +23,16 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Neo4j query failed: {e}")
             return []
+
+    def _verify_read_only(self, query: str) -> bool:
+        """Defense-in-depth check for write keywords."""
+        unsafe_keywords = ["CREATE", "DELETE", "DETACH", "SET", "REMOVE", "DROP", "MERGE", "CALL"]
+        query_upper = query.upper()
+        for kw in unsafe_keywords:
+            # Simple check, not a full parser, but effective against blatant injection
+            if kw in query_upper:
+                return False
+        return True
 
     def get_all_data(self) -> List[Dict[str, Any]]:
         query = """
