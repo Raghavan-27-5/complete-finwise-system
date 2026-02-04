@@ -172,7 +172,7 @@ def run_finwise(symbol: str, days: int):
     )
 
     return (
-        state["trend"],        # Market Regime
+        state["price"]["trend"],        # Market Regime
         dsp_value,             # Global DSP
         downside_var,          # 5% VaR
         risk_context,          # Risk Context
