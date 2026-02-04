@@ -369,7 +369,7 @@ def monte_carlo_heston(
     # but for a "cone" visualization, direct log-normal sampling centered on drift is standard.
     
     # Random component: N(0, 1) * sigma
-    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * sigma_daily
+    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * float(sigma_daily)
     
     # Path evolution
     log_returns = daily_drift + random_shocks
@@ -463,7 +463,7 @@ def monte_carlo_heston_stats_only(
     # 3) GBM Simulation
     # -------------------------------
     # Generate cumulative log returns
-    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * sigma_daily
+    random_shocks = np.random.normal(0, 1, (n_simulations, days)) * float(sigma_daily)
     log_returns = daily_drift + random_shocks
     cum_log_returns = np.cumsum(log_returns, axis=1)
     
