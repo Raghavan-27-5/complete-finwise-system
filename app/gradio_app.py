@@ -130,7 +130,7 @@ def run_finwise(symbol: str, days: int):
         pd.DataFrame(
             [
                 (k, round(float(v.get("score", 0.0)), 2))
-                for k, v in state["sentiment_aspects"].items()
+                for k, v in state["sentiment"]["aspects"].items()
             ],
             columns=["Aspect", "Signed Impact"]
         )
