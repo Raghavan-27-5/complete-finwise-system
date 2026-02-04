@@ -124,6 +124,12 @@ class KGWriter:
                                 aspect_name=aspect_name,
                             )
 
+                            # Fix for CypherTypeError: aspect_value is a dict {'label': '...', 'score': ...}
+                            # We must extract the numeric score for the 'value' property.
+                            real_val = aspect_value
+                            if isinstance(aspect_value, dict) and 'score' in aspect_value:
+                                real_val = aspect_value['score']
+                            
                             tx.run(
                                 f"""
                                 MATCH (sn:{NODE_SNAPSHOT} {{symbol: $symbol, as_of: $as_of}})
@@ -137,7 +143,7 @@ class KGWriter:
                                 as_of=state.as_of,
                                 aspect_name=aspect_name,
                                 name=aspect_name,
-                                value=aspect_value,
+                                value=real_val,
                                 direction=None,
                             )
 
