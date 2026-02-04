@@ -40,10 +40,28 @@ def downside_var_percentile(history_prices, current_var):
 
 
 # =========================================================
+# DATABASE CONNECTION
+# =========================================================
+import os
+from neo4j import GraphDatabase
+from kg.kg_writer import KGWriter
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Setup Neo4j Driver (Global for session)
+URI = os.getenv("AURA_CONNECTION_URI")
+AUTH = (os.getenv("AURA_USERNAME"), os.getenv("AURA_PASSWORD"))
+driver = GraphDatabase.driver(URI, auth=AUTH)
+kg_writer = KGWriter(driver)
+
+
+# =========================================================
 # CORE CALLBACK
 # =========================================================
 def run_finwise(symbol: str, days: int):
-    state = compute_state(symbol, int(days))
+    # Pass the kg_writer dependency
+    state = compute_state(symbol, int(days), kg_writer)
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
     # ---------------- PRICE vs MODEL ----------------
