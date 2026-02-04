@@ -76,9 +76,73 @@ MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
     "stock_price_model.h5"
 )
-model = load_model(MODEL_PATH)
 
-model.make_predict_function()
+def _ensure_model_exists():
+    """
+    Checks if model exists. If not, trains a minimal model on AAPL data so the app can start.
+    This is critical for fresh Git clones (e.g., Colab) where the .h5 file is missing.
+    """
+    if os.path.exists(MODEL_PATH):
+        try:
+            # Quick validation that it loads
+            test_model = load_model(MODEL_PATH)
+            return test_model
+        except Exception:
+            print("⚠️ Existing model file is checking corrupted. Re-training...")
+    
+    print("🚀 No pre-trained model found. Auto-training initial model on AAPL...")
+    try:
+        # Import training dependencies locally to avoid circular imports
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import LSTM, Dense
+        
+        # 1. Fetch dummy data (AAPL)
+        print("   - Downloading data...")
+        df_train = yf.download("AAPL", period="1y", progress=False)
+        
+        # 2. Preprocess
+        scaler = MinMaxScaler()
+        scaled_data = scaler.fit_transform(df_train['Close'].values.reshape(-1, 1))
+        
+        x_train, y_train = [], []
+        # Ensure we have enough data
+        if len(scaled_data) > TIME_STEP:
+            for i in range(TIME_STEP, len(scaled_data)):
+                x_train.append(scaled_data[i-TIME_STEP:i, 0])
+                y_train.append(scaled_data[i, 0])
+            
+            x_train, y_train = np.array(x_train), np.array(y_train)
+            x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+            
+            # 3. Define Model
+            print("   - Building architecture...")
+            new_model = Sequential()
+            new_model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
+            new_model.add(LSTM(units=50, return_sequences=False))
+            new_model.add(Dense(units=25))
+            new_model.add(Dense(units=1))
+            
+            # 4. Train (Fast)
+            print("   - Training (5 epochs)...")
+            new_model.compile(optimizer='adam', loss='mean_squared_error')
+            new_model.fit(x_train, y_train, batch_size=32, epochs=5, verbose=0)
+            
+            # 5. Save
+            print(f"   - Saving to {MODEL_PATH}...")
+            new_model.save(MODEL_PATH)
+            return new_model
+            
+    except Exception as e:
+        print(f"❌ Auto-training failed: {e}")
+        # Return a completely broken dummy if training fails, to prevent import crash
+        return None
+
+# Load or Train
+model = _ensure_model_exists()
+if model:
+    model.make_predict_function()
+else:
+    print("CRITICAL: Model failed to initialize.")
 portfolio = {}
 
 # ----------------- DATA PREPROCESSING -----------------
