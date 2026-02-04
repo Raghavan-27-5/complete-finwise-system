@@ -400,6 +400,7 @@ def extract_entities_transformer(text: str) -> Dict[str, List[str]]:
 # -------------------------
 
 def process_multimodal(text, media_url):
+    import pandas as pd
     if isinstance(text, str):
         return text.strip()
     if text is None or pd.isna(text):
