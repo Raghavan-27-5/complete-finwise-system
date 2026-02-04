@@ -113,7 +113,8 @@ def run_finwise(symbol: str, days: int):
     )
 
     # ---------------- DSP ----------------
-    dsp_value = float(state["sentiment_score"])
+    # Computed in orchestrator as state["sentiment"]["global_score"]
+    dsp_value = float(state["sentiment"]["global_score"])
 
     # ---------------- DOWNSIDE RISK CONTEXT ----------------
     downside_var = float(state["monte_carlo"]["downside_var"])
