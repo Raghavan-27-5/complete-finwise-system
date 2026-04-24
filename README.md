@@ -289,5 +289,5 @@ Types: Feat, Fix, Docs, Refactor, Test, Chore
 
 <p align="center">
   <strong>© 2025 FinWise Financial Intelligence</strong><br/>
-  <em>Internal Use Only</em>
+  <em>PUBLIC</em>
 </p>
