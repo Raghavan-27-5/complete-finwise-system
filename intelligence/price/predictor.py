@@ -84,16 +84,67 @@ MODEL_PATH = os.path.join(
     "stock_price_model.h5"
 )
 def _load_price_model(path):
-    """Load the legacy Keras .h5 model with a compile-free retry.
+    """Load the legacy Keras .h5 checkpoint with every available Keras backend.
 
-    The first attempt preserves the original behaviour; the retry covers
-    TF 2.16+ runtimes where the saved optimizer/config state cannot be
-    deserialized (common on Google Colab).
+    The checkpoint was trained in a Keras 3 session, so its layer configuration
+    uses Keras 3 keys (``batch_shape``) that a Keras 2 loader rejects. Colab's
+    TensorFlow 2.20 exposes Keras 2 through ``TF_USE_LEGACY_KERAS=1``, so no
+    single loader can be assumed: try the active ``tensorflow.keras`` loader,
+    then the standalone Keras 3 package and the ``tf_keras`` shim, each with and
+    without ``compile``. If every loader refuses the file, rebuild the model from
+    the JSON config stored inside the HDF5 and load the weights directly.
     """
+    candidates = []
+    last_error = None
+
+    def _register(loader):
+        if loader is not None and all(loader is not seen for seen in candidates):
+            candidates.append(loader)
+
+    _register(load_model)
+    for module_name in ("keras", "tf_keras", "tensorflow.keras"):
+        try:
+            module = __import__(module_name, fromlist=["models"])
+            _register(getattr(getattr(module, "models", None), "load_model", None))
+        except Exception:
+            continue
+
+    for loader in candidates:
+        for kwargs in ({}, {"compile": False}):
+            try:
+                return loader(path, **kwargs)
+            except Exception as exc:  # try the next backend / flag combination
+                last_error = exc
+
+    # Last resort: rebuild from the serialized config and load weights directly.
     try:
-        return load_model(path)
-    except Exception:
-        return load_model(path, compile=False)
+        import h5py
+
+        with h5py.File(path, "r") as handle:
+            raw = handle.attrs.get("model_config")
+            if raw is None:
+                raw = handle["model_config"][()]
+        try:
+            config = bytes(raw).decode("utf-8")
+        except Exception:
+            config = str(raw)
+
+        for module_name in ("keras", "tf_keras", "tensorflow.keras"):
+            try:
+                module = __import__(module_name, fromlist=["models"])
+                model = module.models.model_from_json(config)
+                model.load_weights(path)
+                return model
+            except Exception as exc:
+                last_error = exc
+    except Exception as exc:
+        last_error = exc
+
+    raise RuntimeError(
+        f"Could not load {os.path.basename(path)} with any available Keras "
+        f"backend ({len(candidates)} loaders tried, plus a config rebuild). "
+        f"Last error: {type(last_error).__name__}: {last_error}"
+    ) from last_error
 
 
 model = _load_price_model(MODEL_PATH)
