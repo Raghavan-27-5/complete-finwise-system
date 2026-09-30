@@ -25,12 +25,53 @@ import os
 import sys
 import html
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FuturesTimeout
 
 # Per-stage click timings land here so a slow click is diagnosable from the
 # Colab log without switching on the pipeline's own debug output.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [FW] %(message)s")
 _perf_log = logging.getLogger("finwise.perf")
+
+# ---------------------------------------------------------------------------
+# UI click budget (gradio_app.py owns this — nothing downstream may exceed it).
+# A single Gradio click = resolve + price/sentiment engines + render. The
+# engines each carry their own generous timeouts (90s/150s), so without a UI
+# ceiling one click can stack them into the 300s+ queue ETA in the screenshot.
+# Clamp every downstream cap DOWN to a sub-60s envelope *before* importing the
+# pipeline (all those modules read os.environ once at import time).
+# ---------------------------------------------------------------------------
+CLICK_BUDGET_SECONDS = 55.0
+_CLICK_ENV_CAPS = {
+    # price+sentiment pair as seen by the orchestrator
+    "FINWISE_ENGINE_TIMEOUT": "40",
+    # whole sentiment engine (adapter)
+    "FINWISE_SENTIMENT_TIMEOUT": "35",
+    # news aggregation inside the sentiment pipeline
+    "FINWISE_FETCH_TIMEOUT": "20",
+    # blocking yfinance calls inside the pipeline
+    "FINWISE_YF_TIMEOUT": "8",
+    # ticker probe chain (symbols.py)
+    "FINWISE_PROBE_TIMEOUT": "5",
+    "FINWISE_RESOLVE_BUDGET": "8",
+    # FinBERT fan-out: articles × (1 global + N aspects)
+    "FINWISE_MAX_ARTICLES": "8",
+    "FINWISE_ASPECT_SCORE_LIMIT": "3",
+}
+for _k, _cap in _CLICK_ENV_CAPS.items():
+    try:
+        _cur = os.environ.get(_k)
+        if _cur is None:
+            os.environ[_k] = _cap
+        elif float(_cur) > float(_cap):
+            os.environ[_k] = _cap
+    except Exception:
+        try:
+            os.environ[_k] = _cap
+        except Exception:
+            pass
 
 # Ensure the project root is importable when this file is run from anywhere.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -43,6 +84,15 @@ from datetime import datetime, timezone
 
 from core.orchestrator import compute_state
 from core.symbols import resolve_symbol
+
+# Single-flight + result cache (queue-ETA fix, gradio_app.py only).
+_CLICK_LOCK = threading.Lock()
+_CACHE_LOCK = threading.Lock()
+_ORPHAN_LOCK = threading.Lock()
+_ORPHAN_RUNNING = False
+_RESULT_CACHE = {}
+_RESULT_CACHE_TTL_SECONDS = 120.0
+
 
 
 # =============================================================================
@@ -561,6 +611,59 @@ def _error_html(message):
     )
 
 
+def _empty_fig(title: str):
+    fig = go.Figure()
+    try:
+        fig.update_layout(
+            template=None, paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color=C_TXT, family=FONT_UI, size=11),
+            title=dict(text=str(title), font=dict(size=12, color=C_MUTED)),
+            margin=dict(l=8, r=8, t=36, b=8),
+            xaxis=dict(showgrid=False, zeroline=False),
+            yaxis=dict(showgrid=False, zeroline=False),
+        )
+    except Exception:
+        pass
+    return fig
+
+
+def _busy_placeholders(reason: str):
+    note = html.escape(str(reason))
+    k = ("<div class='panel'><div class='panel-title'>KPI Deck <span>· busy</span></div>"
+         f"<div class='empty-state'>BUSY — {note}. Wait, then click once.</div></div>")
+    s = ("<div class='status-strip'><span class='chip warn'>BUSY</span>"
+         "<span class='chip'>single-flight active</span></div>")
+    h = _empty_fig("Busy — previous run in flight")
+    m = _empty_fig("Busy — previous run in flight")
+    f = _empty_fig("Busy — previous run in flight")
+    asp = ("<div class='panel aspect-panel'><div class='panel-title'>Aspect Decomposition "
+           "<span>· busy</span></div><div class='empty-state'>Previous run in flight.</div></div>")
+    art = ("<div class='panel'><div class='panel-title'>Top Impact Articles <span>· busy</span>"
+           "</div><div class='empty-state'>Previous run in flight.</div></div>")
+    e = f"<div class='error-banner'>BUSY: {note} — wait, then click once.</div>"
+    return (k, s, h, m, f, asp, art, e)
+
+
+def _timeout_placeholders(elapsed: float):
+    k = ("<div class='panel'><div class='panel-title'>KPI Deck <span>· timeout</span></div>"
+         f"<div class='empty-state'>Click budget ({CLICK_BUDGET_SECONDS:.0f}s) exceeded "
+         f"after {elapsed:.1f}s. Try once more.</div></div>")
+    s = ("<div class='status-strip'><span class='chip warn'>TIMEOUT</span>"
+         f"<span class='chip'>budget {CLICK_BUDGET_SECONDS:.0f}s</span>"
+         f"<span class='chip'>elapsed {elapsed:.1f}s</span></div>")
+    h = _empty_fig("Timeout — no price path")
+    m = _empty_fig("Timeout — no risk envelope")
+    f = _empty_fig("Timeout — no forward path")
+    asp = ("<div class='panel aspect-panel'><div class='panel-title'>Aspect Decomposition "
+           "<span>· timeout</span></div><div class='empty-state'>No narrative pressure.</div></div>")
+    art = ("<div class='panel'><div class='panel-title'>Top Impact Articles <span>· timeout</span>"
+           "</div><div class='empty-state'>No articles this click.</div></div>")
+    e = (f"<div class='error-banner'>Click timeout after {elapsed:.1f}s (budget "
+         f"{CLICK_BUDGET_SECONDS:.0f}s). Wait ~30s, then click once.</div>")
+    return (k, s, h, m, f, asp, art, e)
+
+
 def _as_list(value):
     """Coerce list/tuple/ndarray/Series into a plain list; junk becomes []."""
     try:
@@ -574,7 +677,7 @@ def _as_list(value):
 # =============================================================================
 # CORE CALLBACK (frozen contract: docs/DEMO_CONTRACT.md section 3)
 # =============================================================================
-def run_finwise(symbol: str, days: int):
+def _run_finwise_uncapped(raw_symbol, horizon, t0, compute_fn=None, resolve_fn=None):
     """Evaluate one ticker and return the 8 dashboard outputs, never raising.
 
     Output order: kpi_html, status_html, hist_plot, mc_plot, fc_plot,
@@ -587,11 +690,15 @@ def run_finwise(symbol: str, days: int):
         _perf_log.info("[FW] %s", f"{stage:<28} {_elapsed(started):6.2f}s")
 
     try:
-        horizon = min(max(int(days), 1), 30)
+        horizon = min(max(int(horizon), 1), 30)
     except Exception:
         horizon = 7
 
-    raw_symbol = "" if symbol is None else str(symbol).strip()
+    raw_symbol = "" if raw_symbol is None else str(raw_symbol).strip()
+    if compute_fn is None:
+        compute_fn = globals().get("compute_state")
+    if resolve_fn is None:
+        resolve_fn = globals().get("resolve_symbol")
 
     # ------------- BLANK TICKER: banner + placeholders, no pipeline call ------
     if not raw_symbol:
@@ -608,7 +715,7 @@ def run_finwise(symbol: str, days: int):
         )
 
     try:
-        resolved, tried = resolve_symbol(raw_symbol)
+        resolved, tried = (resolve_fn or globals()["resolve_symbol"])(raw_symbol)
         _mark(f"resolve_symbol({raw_symbol})")
         if not resolved:
             resolved = raw_symbol
@@ -635,7 +742,7 @@ def run_finwise(symbol: str, days: int):
             )
 
         # Third arg None -> skip the Neo4j/KG snapshot write (standalone mode).
-        state = compute_state(resolved, horizon, None)
+        state = (compute_fn or globals()["compute_state"])(resolved, horizon, None)
         _mark("compute_state (both engines)")
         if not isinstance(state, dict):
             state = {}
@@ -776,6 +883,91 @@ def run_finwise(symbol: str, days: int):
             _articles_html([]),
             _error_html(message),
         )
+
+# =============================================================================
+# PUBLIC CALLBACK (frozen contract: docs/DEMO_CONTRACT.md section 3)
+# Sub-60s envelope: cache -> single-flight -> hard click budget -> pipeline.
+# =============================================================================
+def run_finwise(symbol: str, days: int):
+    t0 = time.monotonic()
+    raw = "" if symbol is None else str(symbol).strip()
+    try:
+        horizon = min(max(int(days), 1), 30)
+    except Exception:
+        horizon = 7
+    key = (raw.upper(), horizon)
+    try:
+        with _CACHE_LOCK:
+            hit = _RESULT_CACHE.get(key)
+            if hit is not None:
+                ts, cached = hit
+                if time.monotonic() - ts <= _RESULT_CACHE_TTL_SECONDS:
+                    _perf_log.info("[FW] run_finwise cache-hit %s/%dd (%.2fs)",
+                                   raw or "empty", horizon, time.monotonic() - t0)
+                    return cached
+                del _RESULT_CACHE[key]
+    except Exception:
+        pass
+    if not _CLICK_LOCK.acquire(blocking=False):
+        _perf_log.info("[FW] run_finwise single-flight BUSY %s/%dd",
+                        raw or "empty", horizon)
+        return _busy_placeholders(
+            "evaluation for '%s' already in progress" % (raw or "ticker"))
+    try:
+        with _ORPHAN_LOCK:
+            orphan = _ORPHAN_RUNNING
+        if orphan:
+            return _busy_placeholders(
+                "previous evaluation still releasing - try again in ~30s")
+        import sys as _sys
+        mod = _sys.modules.get(__name__)
+        _cf = getattr(mod, "compute_state", None)
+        _rf = getattr(mod, "resolve_symbol", None)
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(_run_finwise_uncapped, raw, horizon, t0, _cf, _rf)
+            try:
+                result = fut.result(timeout=CLICK_BUDGET_SECONDS)
+            except _FuturesTimeout:
+                elapsed = time.monotonic() - t0
+                with _ORPHAN_LOCK:
+                    globals()["_ORPHAN_RUNNING"] = True
+                def _reap(_fut=fut, _pool=pool):
+                    try:
+                        _fut.result(timeout=180)
+                    except Exception:
+                        pass
+                    finally:
+                        with _ORPHAN_LOCK:
+                            globals()["_ORPHAN_RUNNING"] = False
+                        try:
+                            _pool.shutdown(wait=False, cancel_futures=True)
+                        except Exception:
+                            pass
+                import threading as _th
+                _th.Thread(target=_reap, daemon=True).start()
+                _perf_log.warning("[FW] run_finwise CLICK TIMEOUT %s/%dd after %.1fs",
+                                  raw or "empty", horizon, elapsed)
+                return _timeout_placeholders(elapsed)
+            try:
+                with _CACHE_LOCK:
+                    _RESULT_CACHE[key] = (time.monotonic(), result)
+            except Exception:
+                pass
+            return result
+        finally:
+            try:
+                if fut.done():
+                    pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+    finally:
+        try:
+            _CLICK_LOCK.release()
+        except Exception:
+            pass
+
+
 
 
 # =============================================================================
@@ -1324,9 +1516,11 @@ with gr.Blocks(
     ]
 
     run_btn.click(fn=run_finwise, inputs=[ticker, horizon],
-                  outputs=dashboard_outputs)
+                  outputs=dashboard_outputs,
+                  concurrency_limit=1, concurrency_id="finwise-run")
     ticker.submit(fn=run_finwise, inputs=[ticker, horizon],
-                  outputs=dashboard_outputs)
+                  outputs=dashboard_outputs,
+                  concurrency_limit=1, concurrency_id="finwise-run")
 
     reset_btn.click(
         fn=lambda: (
@@ -1342,4 +1536,7 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
-    demo.queue().launch(share=True)
+    # Single runner slot: concurrent clicks serialize here instead of stacking
+    # parallel GPU/CPU pipeline runs; overlapping clicks get the BUSY 8-tuple
+    # from run_finwise itself, so the visible queue ETA stays truthful.
+    demo.queue(max_size=2).launch(share=True)
