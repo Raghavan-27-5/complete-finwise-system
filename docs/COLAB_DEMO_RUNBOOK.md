@@ -40,7 +40,28 @@ timed from step 7 onwards.
 
 ---
 
-## 2. Timing budget (measured shape, not optimism)
+## 1b. T4 & free-tier policy reality (verified against Colab's official FAQ)
+
+Quoted from <https://research.google.com/colaboratory/faq.html> (checked for this demo):
+
+- *"Colab is a hosted Jupyter Notebook service … provides free of charge access to
+  computing resources, including GPUs and TPUs."* → a GPU **is** part of the free tier.
+- *"Colab resources are not guaranteed and not unlimited, and usage limits sometimes
+  fluctuate."* → the **T4 is offered, not guaranteed**. Treat it as a bonus: the CPU
+  runtime runs this dashboard identically, only slower. Never restart mid-demo to
+  hunt for a GPU.
+- Free-tier restrictions (same FAQ): *"remote control such as SSH shells, remote
+  desktops, bypassing the notebook UI to interact primarily via a web UI"* are
+  disallowed. → **Do not use `docs/COLAB_SETUP.md` (VS Code + Cloudflare SSH tunnel)
+  for this demo** on a free account. Run everything from the notebook.
+- The app also renders **inline** in cell 9, so screen-sharing the notebook itself is
+  fully policy-safe; the `*.gradio.live` link is only a convenience for the mentor's
+  own device.
+- Session lifetime: free runtimes are recycled (FAQ: free-tier users *"commonly
+  experience runtime terminations"*) and die much sooner when idle — keep the tab
+  open and cell 11 (keep-alive) running.
+
+---
 
 | Stage | Cell | Typical | Worst case | Notes |
 | --- | --- | --- | --- | --- |
