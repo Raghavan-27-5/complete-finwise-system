@@ -24,7 +24,13 @@ Hard rules honoured here:
 import os
 import sys
 import html
+import logging
 import time
+
+# Per-stage click timings land here so a slow click is diagnosable from the
+# Colab log without switching on the pipeline's own debug output.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [FW] %(message)s")
+_perf_log = logging.getLogger("finwise.perf")
 
 # Ensure the project root is importable when this file is run from anywhere.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -576,6 +582,10 @@ def run_finwise(symbol: str, days: int):
     """
     started = time.perf_counter()
 
+    def _mark(stage: str) -> None:
+        """Log a per-stage timing line so a slow click is diagnosable."""
+        _perf_log.info("[FW] %s", f"{stage:<28} {_elapsed(started):6.2f}s")
+
     try:
         horizon = min(max(int(days), 1), 30)
     except Exception:
@@ -599,6 +609,7 @@ def run_finwise(symbol: str, days: int):
 
     try:
         resolved, tried = resolve_symbol(raw_symbol)
+        _mark(f"resolve_symbol({raw_symbol})")
         if not resolved:
             resolved = raw_symbol
 
@@ -625,6 +636,7 @@ def run_finwise(symbol: str, days: int):
 
         # Third arg None -> skip the Neo4j/KG snapshot write (standalone mode).
         state = compute_state(resolved, horizon, None)
+        _mark("compute_state (both engines)")
         if not isinstance(state, dict):
             state = {}
 
@@ -734,6 +746,7 @@ def run_finwise(symbol: str, days: int):
         )
         aspects_html = _aspects_html(aspects)
         articles_html = _articles_html(articles)
+        _mark("render + return")
 
         return (
             kpi_html,       # 1
