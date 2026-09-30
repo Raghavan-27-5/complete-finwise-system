@@ -16,6 +16,7 @@ Production-ready pipeline.py
 # Any other sentiment pipelines are legacy and must not be used.
 # ============================================================
 
+import asyncio
 import os
 import re
 import json
@@ -59,6 +60,39 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 RISK_THRESHOLD = 0.15
 # Debug verbosity controlled by environment
 FULL_DEBUG = os.environ.get("PIPELINE_DEBUG", "0") == "1"
+
+# Hard wall-clock caps: the dashboard must never hang on a stalled data source.
+FETCH_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_FETCH_TIMEOUT", "75"))
+YF_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_YF_TIMEOUT", "12"))
+
+
+def _call_with_timeout(func, timeout: float, default=None):
+    """Run a blocking callable with a hard wall-clock cap (best effort).
+
+    The worker thread cannot be killed, but the caller stops waiting — which is
+    what keeps the dashboard responsive when Yahoo / SEC endpoints stall.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeout
+
+    # NOTE: no context manager here — exiting one waits for the worker thread,
+    # which would silently undo the timeout we are implementing.
+    pool = ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(func)
+    try:
+        return future.result(timeout=timeout)
+    except FuturesTimeout:
+        logger.warning(
+            "Blocking call %s exceeded %.0fs — continuing without it",
+            getattr(func, "__qualname__", repr(func)),
+            timeout,
+        )
+        return default
+    except Exception as exc:
+        logger.warning("Blocking call failed: %s", exc)
+        return default
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 # -------------------------
 # Helper utilities
@@ -454,8 +488,18 @@ def save_cache(symbol: str, df: pd.DataFrame):
 def fetch_yahoo_close(symbol: str, days: int = 30) -> pd.Series:
     end = pd.Timestamp.now(tz=timezone.utc).normalize()
     start = end - pd.Timedelta(days=days + 15)
-    hist = yf.download(symbol, start=start.date().isoformat(), end=(end + pd.Timedelta(days=1)).date().isoformat(), progress=False, auto_adjust=True)
-    if hist.empty or "Close" not in hist.columns:
+    hist = _call_with_timeout(
+        lambda: yf.download(
+            symbol,
+            start=start.date().isoformat(),
+            end=(end + pd.Timedelta(days=1)).date().isoformat(),
+            progress=False,
+            auto_adjust=True,
+        ),
+        timeout=YF_TIMEOUT_SECONDS,
+        default=None,
+    )
+    if hist is None or hist.empty or "Close" not in hist.columns:
         return pd.Series(dtype=float)
 
     # normalize index to UTC midnight
@@ -722,14 +766,29 @@ async def get_news_sentiment_async(symbol: str, days: int = 10, debug: bool = Fa
     cached_df = load_cache(symbol, days)
 
     try:
-        company_name = yf.Ticker(symbol).info.get('longName', symbol)
+        company_name = _call_with_timeout(
+            lambda: yf.Ticker(symbol).info.get("longName", symbol),
+            timeout=YF_TIMEOUT_SECONDS,
+            default=symbol,
+        )
     except Exception:
         company_name = symbol
 
     query = f"{company_name} OR {symbol}"
     cutoff = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=days)
 
-    fetched = await aggregate_sources(query, symbol, cutoff)
+    try:
+        fetched = await asyncio.wait_for(
+            aggregate_sources(query, symbol, cutoff),
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "News fetch exceeded %.0fs for %s — continuing with cached articles only",
+            FETCH_TIMEOUT_SECONDS,
+            symbol,
+        )
+        fetched = []
     if not fetched and (cached_df is None or cached_df.empty):
         return {"global_score": 0.0, "error": "No articles"}
 

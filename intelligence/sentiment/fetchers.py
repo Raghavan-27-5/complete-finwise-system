@@ -47,7 +47,11 @@ def get_cik_map() -> Dict[str, str]:
     url = "https://www.sec.gov/files/company_tickers.json"
     try:
         # SEC requires a real User-Agent with contact info for programmatic access
-        response = requests.get(url, headers={'User-Agent': 'Raghavan r3398465@gmail.com'})
+        response = requests.get(
+            url,
+            headers={'User-Agent': 'Raghavan r3398465@gmail.com'},
+            timeout=15,  # never hang the pipeline on a stalled SEC endpoint
+        )
         response.raise_for_status()
         data = response.json()
         return {val['ticker']: str(val['cik_str']).zfill(10) for _, val in data.items()}
