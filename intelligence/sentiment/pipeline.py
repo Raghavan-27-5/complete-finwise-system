@@ -67,6 +67,22 @@ FETCH_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_FETCH_TIMEOUT", "75"))
 YF_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_YF_TIMEOUT", "12"))
 
 
+def _cache_connect():
+    """Open the sentiment cache with a short busy timeout.
+
+    The price and sentiment engines now run in the same process, so two threads
+    can touch this file at once. The default 5s busy timeout can block a writer
+    for seconds; 2s keeps a contended write fast and non-fatal (the caller
+    already degrades on cache errors).
+    """
+    return sqlite3.connect(CACHE_DB, timeout=2)
+
+
+def _cache_connect_ro():
+    """Read-only connection so a load can never take a write lock."""
+    return sqlite3.connect(f"file:{CACHE_DB}?mode=ro", uri=True, timeout=2)
+
+
 def _call_with_timeout(func, timeout: float, default=None):
     """Run a blocking callable with a hard wall-clock cap (best effort).
 
@@ -381,7 +397,7 @@ def init_cache_db():
         except Exception:
             pass
 
-    with sqlite3.connect(CACHE_DB) as conn:
+    with _cache_connect() as conn:
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS articles (
@@ -427,7 +443,7 @@ init_cache_db()
 def load_cache(symbol: str, days: int) -> pd.DataFrame:
     cutoff = (datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=days)).isoformat()
     try:
-        with sqlite3.connect(CACHE_DB) as conn:
+        with _cache_connect() as conn:
             df = pd.read_sql_query(
                 "SELECT * FROM articles WHERE symbol=? AND published >= ?",
                 conn, params=(symbol, cutoff)
@@ -470,7 +486,7 @@ def save_cache(symbol: str, df: pd.DataFrame):
     df_to_save = df_to_save[[c for c in cols if c in df_to_save.columns]]
 
     try:
-        with sqlite3.connect(CACHE_DB) as conn:
+        with _cache_connect() as conn:
             cur = conn.cursor()
             colnames = ', '.join(df_to_save.columns)
             placeholders = ', '.join(['?'] * len(df_to_save.columns))
@@ -696,7 +712,7 @@ def causal_validation(symbol: str, df: pd.DataFrame, days: int) -> Union[float, 
     Aligns by normalized UTC date index. Requires >=10 matching days.
     """
     try:
-        with sqlite3.connect(CACHE_DB) as conn:
+        with _cache_connect() as conn:
             history = pd.read_sql_query(
                 "SELECT date, score FROM daily_sentiment WHERE symbol=? ORDER BY date ASC",
                 conn, params=(symbol,)
@@ -1077,7 +1093,7 @@ async def get_news_sentiment_async(symbol: str, days: int = 10, debug: bool = Fa
 
         params = (symbol, today_str, daily_score, article_count, relevant_rate, now_iso)
         try:
-            with sqlite3.connect(CACHE_DB) as conn:
+            with _cache_connect() as conn:
                 cur = conn.cursor()
                 try:
                     cur.execute("""

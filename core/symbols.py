@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Dict, List, Tuple
@@ -38,6 +39,9 @@ _PROBE_CACHE: Dict[str, bool] = {}
 # warm-up calls compute_state directly and never probes), so an uncapped probe
 # chain would otherwise add minutes to a single UI click.
 PROBE_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_PROBE_TIMEOUT", "12"))
+# Shared budget for the whole bare -> .NS -> .BO chain, so resolution can never
+# stack three per-probe caps onto one click.
+RESOLVE_BUDGET_SECONDS = float(os.environ.get("FINWISE_RESOLVE_BUDGET", "15"))
 
 
 def normalize_symbol(raw: str) -> str:
@@ -55,16 +59,24 @@ def has_exchange_suffix(symbol: str) -> bool:
     return symbol.endswith(INDIAN_EXCHANGE_SUFFIXES)
 
 
-def _probe_yahoo(symbol: str) -> bool:
+def _probe_yahoo(symbol: str, deadline: float = None) -> bool:
     """Best-effort check that Yahoo Finance recognises ``symbol``.
 
     Uses the lightweight ``fast_info`` endpoint first and falls back to a
-    five-day download, both under a hard wall-clock cap. Any failure
-    (including a missing/offline ``yfinance``) is treated as "unknown symbol"
-    so the caller can try the next candidate without stalling the dashboard.
+    five-day download, both under a hard wall-clock cap (the smaller of
+    ``PROBE_TIMEOUT_SECONDS`` and whatever remains of ``deadline``). Any
+    failure (including a missing/offline ``yfinance``) is treated as "unknown
+    symbol" so the caller can try the next candidate without stalling the UI.
     """
     if symbol in _PROBE_CACHE:
         return _PROBE_CACHE[symbol]
+
+    cap = PROBE_TIMEOUT_SECONDS
+    if deadline is not None:
+        cap = min(cap, max(deadline - time.monotonic(), 0.5))
+        if deadline - time.monotonic() <= 0:
+            _PROBE_CACHE[symbol] = False
+            return False
 
     resolved = False
     try:
@@ -96,12 +108,12 @@ def _probe_yahoo(symbol: str) -> bool:
         pool = ThreadPoolExecutor(max_workers=1)
         future = pool.submit(_check)
         try:
-            resolved = bool(future.result(timeout=PROBE_TIMEOUT_SECONDS))
+            resolved = bool(future.result(timeout=cap))
         except FuturesTimeout:
             logging.getLogger("symbols").warning(
-                "Probe for %s exceeded %.0fs — treating as unknown",
+                "Probe for %s exceeded %.1fs — treating as unknown",
                 symbol,
-                PROBE_TIMEOUT_SECONDS,
+                cap,
             )
             resolved = False
         except Exception as exc:
@@ -135,13 +147,20 @@ def resolve_symbol(raw: str) -> Tuple[str, List[str]]:
     if any(marker in symbol for marker in _STRUCTURED_MARKERS):
         return symbol, tried
 
-    if _probe_yahoo(symbol):
+    # One shared budget for the whole chain: three sequential 12s probes would
+    # add 36s to a single click. The per-probe cap still applies inside
+    # _probe_yahoo, this simply stops the chain early once the budget is gone.
+    deadline = time.monotonic() + RESOLVE_BUDGET_SECONDS
+
+    if _probe_yahoo(symbol, deadline):
         return symbol, tried
 
     for suffix in INDIAN_EXCHANGE_SUFFIXES:
+        if time.monotonic() >= deadline:
+            break
         candidate = f"{symbol}{suffix}"
         tried.append(candidate)
-        if _probe_yahoo(candidate):
+        if _probe_yahoo(candidate, deadline):
             return candidate, tried
 
     return symbol, tried
