@@ -1,6 +1,9 @@
 # upd_final_app.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
+# Colab runs TensorFlow 2.20 (Keras 3); the legacy .h5 model needs the Keras 2 shim.
+# Must be set BEFORE tensorflow is imported anywhere in the process.
+os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
 import numpy as np
 import pandas as pd
@@ -8,7 +11,11 @@ import yfinance as yf
 import datetime as dt
 import plotly.graph_objects as go
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
+try:
+    # Keras 2 path (TF < 2.16, or TF 2.16+ with TF_USE_LEGACY_KERAS=1 as set above).
+    from tensorflow.keras.models import load_model
+except Exception:  # pragma: no cover - Keras 3 runtime fallback
+    from tf_keras.models import load_model
 import gradio as gr
 import warnings
 import requests
@@ -76,9 +83,24 @@ MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
     "stock_price_model.h5"
 )
-model = load_model(MODEL_PATH)
+def _load_price_model(path):
+    """Load the legacy Keras .h5 model with a compile-free retry.
 
-model.make_predict_function()
+    The first attempt preserves the original behaviour; the retry covers
+    TF 2.16+ runtimes where the saved optimizer/config state cannot be
+    deserialized (common on Google Colab).
+    """
+    try:
+        return load_model(path)
+    except Exception:
+        return load_model(path, compile=False)
+
+
+model = _load_price_model(MODEL_PATH)
+
+# Legacy TF 2.x helper (removed in Keras 3): call it only when present.
+if hasattr(model, "make_predict_function"):
+    model.make_predict_function()
 portfolio = {}
 
 # ----------------- DATA PREPROCESSING -----------------

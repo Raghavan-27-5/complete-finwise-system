@@ -4,6 +4,7 @@
 venv/
 .venv/
 env/
+.metrics_venv/
 
 # Python
 __pycache__/

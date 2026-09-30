@@ -198,14 +198,15 @@ The system is organized into six logical layers:
 The orchestration layer (`core/orchestrator.compute_state()`) is **synchronous and blocking**. The sentiment pipeline uses async internally but is wrapped in a sync executor for compatibility.
 
 ```python
-def compute_state(symbol: str, days: int, kg_writer):
+def compute_state(symbol: str, days: int, kg_writer=None):
     p1 = build_price_intelligence(symbol, days)  # Blocking
     p2 = build_sentiment_intelligence(symbol, days)  # Blocking (async wrapped)
     
     raw_state = {...}  # Combine p1 and p2
     
     state = adapt_state(raw_state)  # Convert to typed dataclass
-    kg_writer.write_snapshot(state)  # Write to Neo4j
+    if kg_writer is not None:  # standalone/demo mode skips the Neo4j write
+        kg_writer.write_snapshot(state)
     
     return raw_state
 ```
