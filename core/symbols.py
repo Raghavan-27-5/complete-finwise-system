@@ -19,6 +19,10 @@ module stays cheap and safe on constrained machines.
 
 from __future__ import annotations
 
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Dict, List, Tuple
 
 INDIAN_EXCHANGE_SUFFIXES: Tuple[str, ...] = (".NS", ".BO")
@@ -29,6 +33,11 @@ _STRUCTURED_MARKERS: Tuple[str, ...] = (".", "-", "=")
 
 # Probe results are cached for the process lifetime: repeat clicks are free.
 _PROBE_CACHE: Dict[str, bool] = {}
+
+# Hard cap on Yahoo symbol resolution. Resolution sits on the click path (the
+# warm-up calls compute_state directly and never probes), so an uncapped probe
+# chain would otherwise add minutes to a single UI click.
+PROBE_TIMEOUT_SECONDS = float(os.environ.get("FINWISE_PROBE_TIMEOUT", "12"))
 
 
 def normalize_symbol(raw: str) -> str:
@@ -50,8 +59,9 @@ def _probe_yahoo(symbol: str) -> bool:
     """Best-effort check that Yahoo Finance recognises ``symbol``.
 
     Uses the lightweight ``fast_info`` endpoint first and falls back to a
-    five-day download. Any failure (including a missing/offline ``yfinance``)
-    is treated as "unknown symbol" so the caller can try the next candidate.
+    five-day download, both under a hard wall-clock cap. Any failure
+    (including a missing/offline ``yfinance``) is treated as "unknown symbol"
+    so the caller can try the next candidate without stalling the dashboard.
     """
     if symbol in _PROBE_CACHE:
         return _PROBE_CACHE[symbol]
@@ -60,25 +70,45 @@ def _probe_yahoo(symbol: str) -> bool:
     try:
         import yfinance as yf  # lazy import: keeps this module lightweight
 
-        try:
-            fast_info = yf.Ticker(symbol).fast_info
+        def _check() -> bool:
             try:
-                last_price = fast_info["last_price"]
+                fast_info = yf.Ticker(symbol).fast_info
+                try:
+                    last_price = fast_info["last_price"]
+                except Exception:
+                    last_price = getattr(fast_info, "last_price", None)
+                if last_price is not None:
+                    return True
             except Exception:
-                last_price = getattr(fast_info, "last_price", None)
-            resolved = last_price is not None
-        except Exception:
-            resolved = False
-
-        if not resolved:
+                pass
             frame = yf.download(
                 symbol,
                 period="5d",
                 progress=False,
                 threads=False,
                 auto_adjust=True,
+                timeout=(10, 20),
             )
-            resolved = frame is not None and not frame.empty
+            return frame is not None and not frame.empty
+
+        # NOTE: no context manager here — exiting one waits for the worker
+        # thread and would silently defeat the timeout we are implementing.
+        pool = ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(_check)
+        try:
+            resolved = bool(future.result(timeout=PROBE_TIMEOUT_SECONDS))
+        except FuturesTimeout:
+            logging.getLogger("symbols").warning(
+                "Probe for %s exceeded %.0fs — treating as unknown",
+                symbol,
+                PROBE_TIMEOUT_SECONDS,
+            )
+            resolved = False
+        except Exception as exc:
+            logging.getLogger("symbols").warning("Probe for %s failed: %s", symbol, exc)
+            resolved = False
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
     except Exception:
         resolved = False
 

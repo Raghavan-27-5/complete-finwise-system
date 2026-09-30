@@ -1,4 +1,5 @@
 # models.py (v18.2) - FinBERT primary, robust fallback
+import os
 import re
 import json
 import logging
@@ -24,6 +25,15 @@ except Exception:
 
 logger = logging.getLogger("models")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# ---------------------------------------------------------------------------
+# Cost controls (env-tunable). Every aspect scored is a full FinBERT forward,
+# so an uncapped fan-out over all 15 aspects x N articles made dense-coverage
+# tickers (e.g. AAPL) take minutes instead of seconds. These caps keep a click
+# interactive while preserving the global DSP and the strongest aspects.
+# ---------------------------------------------------------------------------
+ASPECT_SCORE_LIMIT = int(os.environ.get("FINWISE_ASPECT_SCORE_LIMIT", "4"))
+MAX_SCORED_ARTICLES = int(os.environ.get("FINWISE_MAX_ARTICLES", "12"))
 
 # ASPECT_CATEGORIES, ASPECT_KEYWORDS provided by pipeline via import
 # device indicator (we won't force models onto it when accelerate used)
@@ -266,6 +276,26 @@ def compute_ensemble_sentiment(text: str, snippets: Dict[str, str], aspect_promp
 
         aspect_sents = {}
 
+        # Cost guard: score at most ASPECT_SCORE_LIMIT aspects per article.
+        # Each extra aspect is a full FinBERT forward, so ranking the snippets
+        # by length keeps the most substantive narratives and bounds the cost.
+        ranked = sorted(
+            (
+                (aspect, snippet)
+                for aspect, snippet in snippets.items()
+                if isinstance(snippet, str) and len(snippet.strip()) >= 20
+            ),
+            key=lambda pair: len(pair[1]),
+            reverse=True,
+        )
+        affordable = {aspect for aspect, _ in ranked[:ASPECT_SCORE_LIMIT]}
+        if len(ranked) > len(affordable):
+            logger.info(
+                "aspect cap: scoring %d of %d candidate aspects",
+                len(affordable),
+                len(ranked),
+            )
+
         for aspect, snippet in snippets.items():
 
             # Fallback: missing or too-short snippet
@@ -275,6 +305,11 @@ def compute_ensemble_sentiment(text: str, snippets: Dict[str, str], aspect_promp
 
             # Skip if global noise
             if is_global_noise:
+                aspect_sents[aspect] = {"label": "Neutral", "score": 0.0}
+                continue
+
+            # Beyond the per-article budget: neutral, not scored (cost guard)
+            if aspect not in affordable:
                 aspect_sents[aspect] = {"label": "Neutral", "score": 0.0}
                 continue
 

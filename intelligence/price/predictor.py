@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import datetime as dt
+import time
 import plotly.graph_objects as go
 from sklearn.preprocessing import MinMaxScaler
 try:
@@ -51,13 +52,22 @@ def safe_download(
     - disables threading (curl bug source)
     - caches results per symbol+window
     """
-    cache_key = (symbol, start, end, period, auto_adjust)
+    yf_timeouts = {"timeout": (10, 20)}
+
+    # Intraday clicks re-resolve the same window; quantize the cache key to the
+    # day so repeated clicks hit the cache instead of re-downloading 3y of OHLCV.
+    def _cache_key(value):
+        if isinstance(value, dt.datetime):
+            return value.strftime("%Y-%m-%d")
+        return value
+
+    cache_key = (symbol, _cache_key(start), _cache_key(end), period, auto_adjust)
 
     if cache_key in _YF_CACHE:
         return _YF_CACHE[cache_key].copy()
 
     last_exc = None
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
         try:
             df = yf.download(
                 symbol,
@@ -67,12 +77,17 @@ def safe_download(
                 auto_adjust=auto_adjust,
                 threads=False,
                 progress=False,
+                **yf_timeouts,
             )
             if df is not None and not df.empty:
                 _YF_CACHE[cache_key] = df.copy()
                 return df
         except Exception as e:
             last_exc = e
+            # Stop hammering Yahoo: one retry only, and never tight-loop.
+            if attempt >= 1:
+                break
+            time.sleep(0.5)
 
     raise RuntimeError(f"Yahoo download failed for {symbol}") from last_exc
 

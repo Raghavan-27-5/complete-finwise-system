@@ -50,7 +50,8 @@ from intelligence.sentiment.models import (
     compute_ensemble_sentiment,
     process_multimodal,
     explain_sentiment,
-    extract_entities_transformer
+    extract_entities_transformer,
+    MAX_SCORED_ARTICLES,
 )
 
 logger = logging.getLogger("pipeline")
@@ -848,6 +849,22 @@ async def get_news_sentiment_async(symbol: str, days: int = 10, debug: bool = Fa
         processed = processed[processed['is_relevant']].reset_index(drop=True)
 
         if not processed.empty:
+            # Cost guard: the FinBERT ensemble (1 global + up to ASPECT_SCORE_LIMIT
+            # aspects per article) dominates the click latency, and a dense-coverage
+            # ticker can return 50+ relevant articles. Score only the most recent
+            # MAX_SCORED_ARTICLES: freshest news carries the most signal, and this
+            # bounds a click to a predictable, interactive time budget.
+            if len(processed) > MAX_SCORED_ARTICLES:
+                processed = (
+                    processed.sort_values('published', ascending=False)
+                    .head(MAX_SCORED_ARTICLES)
+                    .reset_index(drop=True)
+                )
+                logger.info(
+                    "article cap: scoring the %d most recent of the relevant articles",
+                    MAX_SCORED_ARTICLES,
+                )
+
             processed['aspects'] = [extract_aspects_from_doc(t, ASPECT_KEYWORDS) for t in processed['text'].tolist()]
 
             sentiments = [
